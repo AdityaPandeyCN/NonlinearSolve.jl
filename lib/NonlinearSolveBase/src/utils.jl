@@ -174,34 +174,22 @@ function evaluate_f!!(prob::AbstractNonlinearProblem, fu, u, p = prob.p)
     return evaluate_f!!(prob.f, fu, u, p)
 end
 
-@generated function evaluate_f!!(f::NonlinearFunction, fu, u, p)
-    iip = f <: AbstractNonlinearFunction{true}
-    if iip
-        return quote
-            f(fu, u, p)
-            return fu
-        end
-    else
-        return quote
-            return f(u, p)
-        end
-    end
+function evaluate_f!!(f::AbstractNonlinearFunction{true}, fu, u, p)
+    f(fu, u, p)
+    return fu
+end
+function evaluate_f!!(f::AbstractNonlinearFunction{false}, fu, u, p)
+    return f(u, p)
 end
 
-@generated function evaluate_f(prob::AbstractNonlinearProblem, u)
-    iip = prob <: AbstractNonlinearProblem{<:Any, true}
-    if iip
-        return quote
-            fu = prob.f.resid_prototype === nothing ? similar(u) :
-                similar(prob.f.resid_prototype)
-            prob.f(fu, u, prob.p)
-            return fu
-        end
-    else
-        return quote
-            return prob.f(u, prob.p)
-        end
-    end
+function evaluate_f(prob::AbstractNonlinearProblem{<:Any, true}, u)
+    fu = prob.f.resid_prototype === nothing ? similar(u) :
+        similar(prob.f.resid_prototype)
+    prob.f(fu, u, prob.p)
+    return fu
+end
+function evaluate_f(prob::AbstractNonlinearProblem{<:Any, false}, u)
+    return prob.f(u, prob.p)
 end
 
 function evaluate_f!(cache, u, p)

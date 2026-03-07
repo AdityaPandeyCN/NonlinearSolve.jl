@@ -19,11 +19,13 @@ const NLBUtils = NonlinearSolveBase.Utils
 end
 
 # GPU-compatible helper to check if fx should be cached
-@generated function should_cache_fx(prob::SciMLBase.AbstractNonlinearProblem, f)
-    iip = prob <: SciMLBase.AbstractNonlinearProblem{<:Any, true}
-    return quote
-        $iip && !SciMLBase.has_jac(f)
-    end
+@inline function should_cache_fx(
+        ::SciMLBase.AbstractNonlinearProblem{<:Any, true}, f)
+    return !SciMLBase.has_jac(f)
+end
+@inline function should_cache_fx(
+        ::SciMLBase.AbstractNonlinearProblem{<:Any, false}, f)
+    return false
 end
 
 function identity_jacobian(u::Number, fu::Number, α = true)
@@ -98,28 +100,24 @@ function prepare_jacobian(prob, autodiff, _, x::Number)
     return DINoPreparation()
 end
 
-@generated function prepare_jacobian(prob, autodiff, fx, x)
-    iip = prob <: SciMLBase.AbstractNonlinearProblem{<:Any, true}
-    if iip
-        return quote
-            SciMLBase.has_jac(prob.f) && return AnalyticJacobian()
-            return DIExtras(
-                DI.prepare_jacobian(
-                    prob.f, fx, autodiff, x, Constant(prob.p), strict = Val(false)
-                )
-            )
-        end
-    else
-        return quote
-            SciMLBase.has_jac(prob.f) && return AnalyticJacobian()
-            x isa SArray && return DINoPreparation()
-            return DIExtras(
-                DI.prepare_jacobian(
-                    prob.f, autodiff, x, Constant(prob.p), strict = Val(false)
-                )
-            )
-        end
-    end
+function prepare_jacobian(
+        prob::SciMLBase.AbstractNonlinearProblem{<:Any, true}, autodiff, fx, x)
+    SciMLBase.has_jac(prob.f) && return AnalyticJacobian()
+    return DIExtras(
+        DI.prepare_jacobian(
+            prob.f, fx, autodiff, x, Constant(prob.p), strict = Val(false)
+        )
+    )
+end
+function prepare_jacobian(
+        prob::SciMLBase.AbstractNonlinearProblem{<:Any, false}, autodiff, fx, x)
+    SciMLBase.has_jac(prob.f) && return AnalyticJacobian()
+    x isa SArray && return DINoPreparation()
+    return DIExtras(
+        DI.prepare_jacobian(
+            prob.f, autodiff, x, Constant(prob.p), strict = Val(false)
+        )
+    )
 end
 
 function compute_jacobian!!(_, prob, autodiff, fx, x::Number, ::AnalyticJacobian)
