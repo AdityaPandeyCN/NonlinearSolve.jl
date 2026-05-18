@@ -10,9 +10,13 @@ If the threshold is larger than the problem size, then this method will use `Sim
 
 ### Keyword Arguments:
 
-  - `linesearch`: If `linesearch` is `Val(true)`, then we use the `LiFukushimaLineSearch`
-    line search else no line search is used. For advanced customization of the line search,
-    use `Broyden` from `NonlinearSolve.jl`.
+  - `linesearch`: `Val(true)` uses `LiFukushimaLineSearch`, `Val(false)` disables
+    line search, or pass any `LineSearch.AbstractLineSearchAlgorithm` for a custom one.
+    For `StaticArray`/GPU problems the line search must have a static (non-allocating)
+    dispatch — currently `LiFukushimaLineSearch(; nan_maxiters = nothing)` and
+    `StrongWolfeLineSearch()` qualify. `StrongWolfeLineSearch` additionally requires
+    a `grad_f` keyword forwarded through `solve`. Other algorithms (`BackTracking`,
+    `GoldenSection`, …) work on `Array` inputs but allocate on `StaticArray`.
   - `alpha`: Scale the initial jacobian initialization with `alpha`. If it is `nothing`, we
     will compute the scaling using `2 * norm(fu) / max(norm(u), true)`.
 
@@ -22,14 +26,15 @@ If the threshold is larger than the problem size, then this method will use `Sim
     future.
 """
 @concrete struct SimpleLimitedMemoryBroyden <: AbstractSimpleNonlinearSolveAlgorithm
-    linesearch <: Union{Val{false}, Val{true}}
+    linesearch
     threshold <: Val
     alpha
 end
 
 function SimpleLimitedMemoryBroyden(;
         threshold::Union{Val, Int} = Val(27),
-        linesearch::Union{Bool, Val{true}, Val{false}} = Val(false), alpha = nothing
+        linesearch::Union{Bool, Val{true}, Val{false}, AbstractLineSearchAlgorithm} = Val(false),
+        alpha = nothing
     )
     linesearch = linesearch isa Bool ? Val(linesearch) : linesearch
     threshold = threshold isa Int ? Val(threshold) : threshold
@@ -106,11 +111,12 @@ end
     Tcache = lbroyden_threshold_cache(x, x isa StaticArray ? alg.threshold : Val(η))
     @bb mat_cache = copy(x)
 
-    if alg.linesearch isa Val{true}
-        ls_alg = LiFukushimaLineSearch(; nan_maxiters = nothing)
-        ls_cache = init(prob, ls_alg, fx, x)
+    ls_cache = if alg.linesearch isa Val{true}
+        init(prob, LiFukushimaLineSearch(; nan_maxiters = nothing), fx, x)
+    elseif alg.linesearch isa Val{false}
+        nothing
     else
-        ls_cache = nothing
+        init(prob, alg.linesearch, fx, x; kwargs...)
     end
 
     for i in 1:maxiters
@@ -168,11 +174,12 @@ function internal_static_solve(
 
     xo, δx, fo, δf = x, -fx, fx, fx
 
-    if alg.linesearch === Val(true)
-        ls_alg = LiFukushimaLineSearch(; nan_maxiters = nothing)
-        ls_cache = init(prob, ls_alg, fx, x)
+    ls_cache = if alg.linesearch === Val(true)
+        init(prob, LiFukushimaLineSearch(; nan_maxiters = nothing), fx, x)
+    elseif alg.linesearch === Val(false)
+        nothing
     else
-        ls_cache = nothing
+        init(prob, alg.linesearch, fx, x; kwargs...)
     end
 
     T = promote_type(eltype(x), eltype(fx))

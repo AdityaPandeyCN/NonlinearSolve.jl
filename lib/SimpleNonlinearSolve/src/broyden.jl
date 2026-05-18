@@ -6,19 +6,24 @@ array problems.
 
 ### Keyword Arguments
 
-  - `linesearch`: If `linesearch` is `Val(true)`, then we use the `LiFukushimaLineSearch`
-    line search else no line search is used. For advanced customization of the line search,
-    use `Broyden` from `NonlinearSolve.jl`.
+  - `linesearch`: `Val(true)` uses `LiFukushimaLineSearch`, `Val(false)` disables
+    line search, or pass any `LineSearch.AbstractLineSearchAlgorithm` for a custom one.
+    For `StaticArray`/GPU problems the line search must have a static (non-allocating)
+    dispatch — currently `LiFukushimaLineSearch(; nan_maxiters = nothing)` and
+    `StrongWolfeLineSearch()` qualify. `StrongWolfeLineSearch` additionally requires
+    a `grad_f` keyword forwarded through `solve`. Other algorithms (`BackTracking`,
+    `GoldenSection`, …) work on `Array` inputs but allocate on `StaticArray`.
   - `alpha`: Scale the initial jacobian initialization with `alpha`. If it is `nothing`, we
     will compute the scaling using `2 * norm(fu) / max(norm(u), true)`.
 """
 @concrete struct SimpleBroyden <: AbstractSimpleNonlinearSolveAlgorithm
-    linesearch <: Union{Val{false}, Val{true}}
+    linesearch
     alpha
 end
 
 function SimpleBroyden(;
-        linesearch::Union{Bool, Val{true}, Val{false}} = Val(false), alpha = nothing
+        linesearch::Union{Bool, Val{true}, Val{false}, AbstractLineSearchAlgorithm} = Val(false),
+        alpha = nothing
     )
     linesearch = linesearch isa Bool ? Val(linesearch) : linesearch
     return SimpleBroyden(linesearch, alpha)
@@ -64,11 +69,12 @@ function SciMLBase.__solve(
         prob, abstol, reltol, fx, x, termination_condition, Val(:simple)
     )
 
-    if alg.linesearch isa Val{true}
-        ls_alg = LiFukushimaLineSearch(; nan_maxiters = nothing)
-        ls_cache = init(prob, ls_alg, fx, x)
+    ls_cache = if alg.linesearch isa Val{true}
+        init(prob, LiFukushimaLineSearch(; nan_maxiters = nothing), fx, x)
+    elseif alg.linesearch isa Val{false}
+        nothing
     else
-        ls_cache = nothing
+        init(prob, alg.linesearch, fx, x; kwargs...)
     end
 
     for _ in 1:maxiters
