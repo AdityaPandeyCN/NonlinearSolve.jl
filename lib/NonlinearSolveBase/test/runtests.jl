@@ -130,4 +130,16 @@ using InteractiveUtils, Test
             NonlinearSolveBase.maybe_wrap_nonlinear_f(prob_3d)
         )
     end
+
+    @testset "EnzymeExt _accum_tangent! caches accumulation (#935)" begin
+        include("enzyme_accum_tangent.jl")
+    end
+
+    @testset "PolyAlgorithm solution type is concrete (#878)" begin
+        include("polyalg_solution_type.jl")
+    end
+
+    @testset "EnzymeExt algorithms are inactive_type" begin
+        include("enzyme_inactive_algorithm.jl")
+    end
 end

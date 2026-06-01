@@ -374,7 +374,8 @@ end
                     cache.prob, cache.alg, u,
                     $(Utils.evaluate_f)(cache.prob, u)::_fuType;
                     retcode = cache.retcode, stats = cache.stats,
-                    trace = (cache.caches[1].trace::_traceType)
+                    trace = (cache.caches[1].trace::_traceType),
+                    store_original = cache.alg.store_original
                 )
             end
         end
@@ -400,7 +401,8 @@ end
                         return build_solution_less_specialize(
                             cache.prob, cache.alg, $(u_result_syms[i]), fu;
                             retcode = $(sol_syms[i]).retcode, stats,
-                            original = $(sol_syms[i]), trace = ($(sol_syms[i]).trace::_traceType)
+                            original = $(sol_syms[i]), trace = ($(sol_syms[i]).trace::_traceType),
+                            store_original = cache.alg.store_original
                         )
                     elseif cache.alias_u0
                         # For safety we need to maintain a copy of the solution
@@ -446,7 +448,8 @@ end
             _trace = cache.caches[idx].trace::_traceType
             return build_solution_less_specialize(
                 cache.prob, cache.alg, u::_uType, fus[idx]::_fuType;
-                retcode, cache.stats, trace = _trace
+                retcode, cache.stats, trace = _trace,
+                store_original = cache.alg.store_original
             )
         end
     )
@@ -529,7 +532,8 @@ end
                 u = $(SII.state_values)(prob)
                 return build_solution_less_specialize(
                     prob, alg, u, $(Utils.evaluate_f)(prob, u);
-                    retcode = $(ReturnCode.InitialFailure)
+                    retcode = $(ReturnCode.InitialFailure),
+                    store_original = alg.store_original
                 )
             end
         end
@@ -568,7 +572,8 @@ end
                         return build_solution_less_specialize(
                             prob, alg, $(u_result_syms[i]), $(cur_sol).resid;
                             $(cur_sol).retcode, $(cur_sol).stats,
-                            $(cur_sol).trace, original = $(cur_sol)
+                            $(cur_sol).trace, original = $(cur_sol),
+                            store_original = alg.store_original
                         )
                     elseif alias_u0
                         # For safety we need to maintain a copy of the solution
@@ -606,7 +611,8 @@ end
                     return build_solution_less_specialize(
                         prob, alg, $(u_result_syms[i]), $(sol_syms[i]).resid;
                         $(sol_syms[i]).retcode, $(sol_syms[i]).stats,
-                        $(sol_syms[i]).trace, original = $(sol_syms[i])
+                        $(sol_syms[i]).trace, original = $(sol_syms[i]),
+                        store_original = alg.store_original
                     )
                 end
             end
@@ -731,6 +737,19 @@ function _solve_adjoint(
     )
     alg = extract_alg(args, kwargs, prob.kwargs)
     _prob = get_concrete_problem(prob; u0 = u0, p = p, kwargs...)
+
+    # Enzyme cannot differentiate through FunctionWrappers' `llvmcall`, so its
+    # traced forward solve runs on the unwrapped function (see
+    # `maybe_unwrap_prob_for_enzyme`, #940). That unwrap is keyed off the solver's
+    # own autodiff, which for an MTK DAE initialization is ForwardDiff even when
+    # the *outer* differentiation is Enzyme — so it does not fire here. Key off
+    # the originator instead: the EnzymeOriginator adjoint primal must have the
+    # same (unwrapped) type as Enzyme's traced forward, otherwise the custom
+    # `solve_up` rule's returned primal type mismatches the inferred return type
+    # (`EnzymeRuntimeException: Expected return type of primal to be ...`).
+    if originator isa SciMLBase.EnzymeOriginator && is_fw_wrapped(_prob.f.f)
+        @set! _prob.f.f = get_raw_f(_prob.f.f)
+    end
 
     if has_kwargs(_prob)
         kwargs = isempty(_prob.kwargs) ? kwargs : merge(values(_prob.kwargs), kwargs)
